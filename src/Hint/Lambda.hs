@@ -20,70 +20,8 @@
     \x -> (x +) ==> (+) -- operator reduction
 
 <TEST>
-f a = \x -> x + x -- f a x = x + x
-f a = \a -> a + a -- f _ a = a + a
-f a = \x -> x + x where _ = test
-f (test -> a) = \x -> x + x
-f = \x -> x + x -- f x = x + x
-fun x y z = f x y z -- fun = f
-fun x y z = f x x y z -- fun x = f x x
-fun x y z = f g z -- fun x y = f g
-fun mr = y mr
-fun x = f . g $ x -- fun = f . g
 f = foo (\y -> g x . h $ y) -- g x . h
 f = foo (\y -> g x . h $ y) -- @Message Avoid lambda
-f = foo ((*) x) -- (x *)
-f = (*) x
-f = foo (flip op x) -- (`op` x)
-f = foo (flip op x) -- @Message Use section
-foo x = bar (\ d -> search d table) -- (`search` table)
-foo x = bar (\ d -> search d table) -- @Message Avoid lambda using `infix`
-f = flip op x
-f = foo (flip (*) x) -- (* x)
-f = foo (flip (-) x)
-f = foo (\x y -> fun x y) -- @Warning fun
-f = foo (\x y -> x + y) -- (+)
-f = foo (\x -> x * y) -- @Suggestion (* y)
-f = foo (\x -> x # y)
-f = foo (\x -> \y -> x x y y) -- \x y -> x x y y
-f = foo (\x -> \x -> foo x x) -- \_ x -> foo x x
-f = foo (\(foo -> x) -> \y -> x x y y)
-f = foo (\(x:xs) -> \x -> foo x x) -- \(_:xs) x -> foo x x
-f = foo (\x -> \y -> \z -> x x y y z z) -- \x y z -> x x y y z z
-x ! y = fromJust $ lookup x y
-f = foo (\i -> writeIdea (getClass i) i)
-f = bar (flip Foo.bar x) -- (`Foo.bar` x)
-f = a b (\x -> c x d)  -- (`c` d)
-yes = \x -> a x where -- a
-yes = \x y -> op y x where -- flip op
-f = \y -> nub $ reverse y where -- nub . reverse
-f = \z -> foo $ bar $ baz z where -- foo . bar . baz
-f = \z -> foo $ bar x $ baz z where -- foo . bar x . baz
-f = \z -> foo $ z $ baz z where
-f = \x -> bar map (filter x) where -- bar map . filter
-f = bar &+& \x -> f (g x)
-foo = [\column -> set column [treeViewColumnTitle := printf "%s (match %d)" name (length candidnates)]]
-foo = [\x -> x]
-foo = [\m x -> insert x x m]
-foo a b c = bar (flux ++ quux) c where flux = a -- foo a b = bar (flux ++ quux)
-foo a b c = bar (flux ++ quux) c where flux = c
-yes = foo (\x -> Just x) -- @Warning Just
-foo = bar (\x -> (x `f`)) -- f
-baz = bar (\x -> (x +)) -- (+)
-foo = bar (\x -> case x of Y z -> z) -- \(Y z) -> z
-yes = blah (\ x -> case x of A -> a; B -> b) -- \ case A -> a; B -> b
-yes = blah (\ x -> case x of A -> a; B -> b) -- @Note may require `{-# LANGUAGE LambdaCase #-}` adding to the top of the file
-no = blah (\ x -> case x of A -> a x; B -> b x)
-yes = blah (\ x -> (y, x)) -- (y,)
-yes = blah (\ x -> (y, x, z+q)) -- (y, , z+q)
-yes = blah (\ x -> (y, x, y, u, v)) -- (y, , y, u, v)
-yes = blah (\ x -> (y, x, z+q)) -- @Note may require `{-# LANGUAGE TupleSections #-}` adding to the top of the file
-yes = blah (\ x -> (y, x, z+x))
-tmp = map (\ x -> runST $ action x)
-yes = map (\f -> dataDir </> f) dataFiles -- (dataDir </>)
-{-# LANGUAGE TypeApplications #-}; noBug545 = coerce ((<>) @[a])
-{-# LANGUAGE QuasiQuotes #-}; authOAuth2 name = authOAuth2Widget [whamlet|Login via #{name}|] name
-{-# LANGUAGE QuasiQuotes #-}; authOAuth2 = foo (\name -> authOAuth2Widget [whamlet|Login via #{name}|] name)
 </TEST>
 -}
 
@@ -100,11 +38,11 @@ import Refact.Types hiding (RType(Match))
 
 import qualified GHC.Util.Brackets as GHC (isAtom')
 import qualified GHC.Util.FreeVars as GHC (free', allVars', freeVars')
-import qualified GHC.Util.HsExpr as GHC (allowLeftSection, allowRightSection)
+import qualified GHC.Util.HsExpr as GHC (allowLeftSection, allowRightSection, niceLambdaR')
 import qualified GHC.Util.RdrName as GHC (rdrNameStr')
 import qualified GHC.Util.View as GHC
 import qualified HsSyn as GHC
-import qualified Language.Haskell.GhclibParserEx.GHC.Hs.Expr as GHC (isTypeApp)
+import qualified Language.Haskell.GhclibParserEx.GHC.Hs.Expr as GHC (isTypeApp, isOpApp, isLambda, isQuasiQuote, isVar)
 import qualified OccName as GHC
 import qualified RdrName as GHC
 import qualified SrcLoc as GHC
@@ -173,7 +111,19 @@ lambdaExp' _ o@(GHC.LL _ (GHC.HsApp _ (GHC.LL _ (GHC.HsApp _ (GHC.LL _ (GHC.HsVa
     | GHC.allowRightSection f
     = [suggestN' "Use section" o $ GHC.LL GHC.noSrcSpan $ GHC.HsPar GHC.NoExt $ GHC.LL GHC.noSrcSpan $ GHC.SectionR GHC.NoExt origf y]
 -- TODO: perhaps PatternSynonyms?
+lambdaExp' p o@(GHC.LL _ GHC.HsLam{})
+    | all (not . GHC.isOpApp) p
+    , (res, refact) <- GHC.niceLambdaR' [] o
+    , not $ GHC.isLambda res
+    , not $ any GHC.isQuasiQuote $ universe res
+    , not $ "runST" `Set.member` (Set.map GHC.occNameString $ GHC.freeVars' o)
+    , let name = "Avoid lambda" ++ (if countRightSections res > countRightSections o then " using `infix`" else "")
+    = [(if GHC.isVar res then warn' else suggest') name o res (refact $ toSS' o)]
+    where
+        countRightSections :: GHC.LHsExpr GHC.GhcPs -> Int
+        countRightSections x = length [() | GHC.LL _ (GHC.SectionR _ (GHC.view' -> GHC.Var_' _) _) <- universe x]
 lambdaExp' _ o@(GHC.LL _ (GHC.HsLam _ (GHC.MG _ (GHC.LL _ [GHC.LL _ (GHC.Match _ _ [GHC.LL _ (GHC.view' -> GHC.PVar_' x)] (GHC.GRHSs _ [GHC.LL _ (GHC.GRHS _ [] (GHC.LL _ expr))] (GHC.LL _ (GHC.EmptyLocalBinds _))))]) _))) =
+-- TODO: use SimpleLambda here?
 -- ^ match a lambda with a variable pattern, with no guards and no where clauses
     case expr of
         GHC.ExplicitTuple _ args boxity
@@ -234,12 +184,14 @@ lambdaExp p o@(Paren _ (App _ v@(Var l (UnQual _ (Symbol _ x))) y)) | isAtom y, 
 --      subts = [("a", toSS y), ("*", toSS v)]
 lambdaExp p o@(Paren _ (App _ (App _ (view -> Var_ "flip") (Var _ x)) y)) | allowRightSection $ fromNamed x =
     [suggestN "Use section" o $ RightSection an (QVarOp an x) y]
+
 lambdaExp p o@Lambda{}
     | maybe True (not . isInfixApp) p, (res, refact) <- niceLambdaR [] o
     , not $ isLambda res, not $ any isQuasiQuote $ universe res, not $ "runST" `Set.member` freeVars o
     , let name = "Avoid lambda" ++ (if countInfixNames res > countInfixNames o then " using `infix`" else "") =
     [(if isVar res || isCon res then warn else suggest) name o res (refact $ toSS o)]
     where countInfixNames x = length [() | RightSection _ (QVarOp _ (UnQual _ (Ident _ _))) _ <- universe x]
+
 lambdaExp p o@(Lambda _ pats x) | isLambda (fromParen x), null (universeBi pats :: [Exp_]), maybe True (not . isLambda) p =
     [suggest "Collapse lambdas" o (Lambda an pats body) [Replace Expr (toSS o) subts template]]
     where
