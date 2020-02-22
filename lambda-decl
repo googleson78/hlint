@@ -1,0 +1,16 @@
+f a = \x -> x + x -- f a x = x + x
+f a = \a -> a + a -- f _ a = a + a
+f a = \x -> x + x where _ = test
+f (test -> a) = \x -> x + x
+f = \x -> x + x -- f x = x + x
+fun x y z = f x y z -- fun = f
+fun x y z = f x x y z -- fun x = f x x
+fun x y z = f g z -- fun x y = f g
+fun mr = y mr
+fun x = f . g $ x -- fun = f . g
+x ! y = fromJust $ lookup x y
+foo a b c = bar (flux ++ quux) c where flux = a -- foo a b = bar (flux ++ quux)
+foo a b c = bar (flux ++ quux) c where flux = c
+{-# LANGUAGE TypeApplications #-}; noBug545 = coerce ((<>) @[a])
+{-# LANGUAGE QuasiQuotes #-}; authOAuth2 name = authOAuth2Widget [whamlet|Login via #{name}|] name
+{-# LANGUAGE QuasiQuotes #-}; authOAuth2 = foo (\name -> authOAuth2Widget [whamlet|Login via #{name}|] name)

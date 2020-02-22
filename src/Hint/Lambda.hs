@@ -31,59 +31,9 @@ fun x y z = f x x y z -- fun x = f x x
 fun x y z = f g z -- fun x y = f g
 fun mr = y mr
 fun x = f . g $ x -- fun = f . g
-f = foo (\y -> g x . h $ y) -- g x . h
-f = foo (\y -> g x . h $ y) -- @Message Avoid lambda
-f = foo ((*) x) -- (x *)
-f = (*) x
-f = foo (flip op x) -- (`op` x)
-f = foo (flip op x) -- @Message Use section
-foo x = bar (\ d -> search d table) -- (`search` table)
-foo x = bar (\ d -> search d table) -- @Message Avoid lambda using `infix`
-f = flip op x
-f = foo (flip (*) x) -- (* x)
-f = foo (flip (-) x)
-f = foo (\x y -> fun x y) -- @Warning fun
-f = foo (\x y z -> fun x y z) -- @Warning fun
-f = foo (\z -> f x $ z) -- f x
-f = foo (\x y -> x + y) -- (+)
-f = foo (\x -> x * y) -- @Suggestion (* y)
-f = foo (\x -> x # y)
-f = foo (\x -> \y -> x x y y) -- \x y -> x x y y
-f = foo (\x -> \x -> foo x x) -- \_ x -> foo x x
-f = foo (\(foo -> x) -> \y -> x x y y)
-f = foo (\(x:xs) -> \x -> foo x x) -- \(_:xs) x -> foo x x
-f = foo (\x -> \y -> \z -> x x y y z z) -- \x y z -> x x y y z z
 x ! y = fromJust $ lookup x y
-f = foo (\i -> writeIdea (getClass i) i)
-f = bar (flip Foo.bar x) -- (`Foo.bar` x)
-f = a b (\x -> c x d)  -- (`c` d)
-yes = \x -> a x where -- a
-yes = \x y -> op y x where -- flip op
-f = \y -> nub $ reverse y where -- nub . reverse
-f = \z -> foo $ bar $ baz z where -- foo . bar . baz
-f = \z -> foo $ bar x $ baz z where -- foo . bar x . baz
-f = \z -> foo $ z $ baz z where
-f = \x -> bar map (filter x) where -- bar map . filter
-f = bar &+& \x -> f (g x)
-foo = [\column -> set column [treeViewColumnTitle := printf "%s (match %d)" name (length candidnates)]]
-foo = [\x -> x]
-foo = [\m x -> insert x x m]
 foo a b c = bar (flux ++ quux) c where flux = a -- foo a b = bar (flux ++ quux)
 foo a b c = bar (flux ++ quux) c where flux = c
-yes = foo (\x -> Just x) -- @Warning Just
-foo = bar (\x -> (x `f`)) -- f
-baz = bar (\x -> (x +)) -- (+)
-foo = bar (\x -> case x of Y z -> z) -- \(Y z) -> z
-yes = blah (\ x -> case x of A -> a; B -> b) -- \ case A -> a; B -> b
-yes = blah (\ x -> case x of A -> a; B -> b) -- @Note may require `{-# LANGUAGE LambdaCase #-}` adding to the top of the file
-no = blah (\ x -> case x of A -> a x; B -> b x)
-yes = blah (\ x -> (y, x)) -- (y,)
-yes = blah (\ x -> (y, x, z+q)) -- (y, , z+q)
-yes = blah (\ x -> (y, x, y, u, v)) -- (y, , y, u, v)
-yes = blah (\ x -> (y, x, z+q)) -- @Note may require `{-# LANGUAGE TupleSections #-}` adding to the top of the file
-yes = blah (\ x -> (y, x, z+x))
-tmp = map (\ x -> runST $ action x)
-yes = map (\f -> dataDir </> f) dataFiles -- (dataDir </>)
 {-# LANGUAGE TypeApplications #-}; noBug545 = coerce ((<>) @[a])
 {-# LANGUAGE QuasiQuotes #-}; authOAuth2 name = authOAuth2Widget [whamlet|Login via #{name}|] name
 {-# LANGUAGE QuasiQuotes #-}; authOAuth2 = foo (\name -> authOAuth2Widget [whamlet|Login via #{name}|] name)
@@ -112,21 +62,45 @@ import qualified OccName as GHC
 import qualified RdrName as GHC
 import qualified SrcLoc as GHC
 import qualified GHC.Util.Outputable as GHC
+import qualified BasicTypes as GHC
 
---lambdaHint :: DeclHint
---lambdaHint _ _ x = concatMap (uncurry lambdaExp) (universeParentBi x) ++ concatMap lambdaDecl (universe x)
-lambdaHint :: DeclHint'
-lambdaHint _ _ x
-    =  concatMap (uncurry lambdaExp') (universeParentBi x)
-    ++ concatMap lambdaDecl' (universe x)
+lambdaHint :: DeclHint
+lambdaHint _ _ x = concatMap (uncurry lambdaExp) (universeParentBi x) ++ concatMap lambdaDecl (universe x)
+--lambdaHint :: DeclHint'
+--lambdaHint _ _ x
+--    =  concatMap (uncurry lambdaExp') (universeParentBi x)
+--    ++ concatMap lambdaDecl' (universe x)
 
 lambdaDecl' :: GHC.LHsDecl GHC.GhcPs -> [Idea]
-lambdaDecl' _ = []
+lambdaDecl'
+    o@(GHC.LL _ (GHC.ValD _
+        origBind@(GHC.FunBind {GHC.fun_matches =
+            (GHC.MG {GHC.mg_alts =
+                GHC.LL _ [GHC.LL _ (GHC.Match _ ctxt pats (GHC.GRHSs _ [GHC.LL _ (GHC.GRHS _ [] origBody)] (GHC.LL _ bind)))]})})))
+    | GHC.EmptyLocalBinds noExt <- bind
+    , GHC.isLambda $ GHC.fromParen' origBody
+    , null (universeBi pats :: [GHC.HsExpr GHC.GhcPs])
+    = [warn "Redundant lambda" o (gen pats body) [Replace Decl (toSS o) s1 t1]]
+    where reform p b = FunBind loc [Match an name p (UnGuardedRhs an b) Nothing]
+          reform' p b =
+            origBind
+              {GHC.fun_matches = GHC.MG GHC.noExt (GHC.noLoc [GHC.noLoc $ GHC.Match GHC.noExt ctxt [] $ GHC.GRHSs GHC.noExt [GHC.noLoc $ GHC.GRHS GHC.noExt [] b] $ GHC.noLoc $ GHC.EmptyLocalBinds GHC.noExt]) GHC.Generated}
+          loc = setSpanInfoEnd loc1 $ srcSpanEnd $ srcInfoSpan loc2
+          gen ps = uncurry reform' . fromLambda' . GHC.lambda ps
+          (finalpats, body) = fromLambda' . GHC.lambda pats $ origBody
+          (pats2, bod2) = etaReduce pats origBody
+          template fps b = prettyPrint $ reform (zipWith munge' ['a'..'z'] fps) (toNamed "body")
+          subts fps b = ("body", toSS b) : zipWith (\x y -> ([x],y)) ['a'..'z'] (map toSS fps)
+          s1 = subts finalpats body
+          --s2 = subts pats2 bod2
+          t1 = template finalpats body
+          --t2 = template pats2 bod2
 
 lambdaDecl :: Decl_ -> [Idea]
 lambdaDecl (toFunBind -> o@(FunBind loc1 [Match _ name pats (UnGuardedRhs loc2 bod) bind]))
     | isNothing bind, isLambda $ fromParen bod, null (universeBi pats :: [Exp_]) =
       [warn "Redundant lambda" o (gen pats bod) [Replace Decl (toSS o) s1 t1]]
+
     | length pats2 < length pats, pvars (drop (length pats2) pats) `disjoint` varss bind
         = [warn "Eta reduce" (reform pats bod) (reform pats2 bod2)
             [ -- Disabled, see apply-refact #3
